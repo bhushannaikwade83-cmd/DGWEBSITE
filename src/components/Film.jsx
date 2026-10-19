@@ -25,8 +25,6 @@ export default function Film() {
     const canvas = el.querySelector("#film");
     const ctx = canvas.getContext("2d");
     const track = el.querySelector("#track");
-    const loader = el.querySelector("#loader");
-    const loadbar = el.querySelector("#loadbar");
     const cue = el.querySelector("#scroll-cue");
     const caps = [...el.querySelectorAll(".caption")];
 
@@ -152,7 +150,6 @@ export default function Film() {
 
     // no frames yet: breathing gold core so the page still works
     const placeholder = () => {
-      loader.classList.add("done");
       const loop = (t) => {
         if (dead) return;
         const cw = canvas.width, ch = canvas.height, p = progress();
@@ -168,14 +165,11 @@ export default function Film() {
     };
 
     const preload = async () => {
-      const eager = Math.min(Math.ceil(st.count * 0.3), 200); // loader waits for the first ~30%
-      let done = 0;
-      await Promise.all(Array.from({ length: eager }, (_, i) => fetchBlob(i).then(() => {
-        done++; loadbar.style.width = `${(done / eager) * 100}%`;
-      })));
+      // no loading screen: start as soon as the first few frames are in, the rest streams in behind
+      const eager = Math.min(6, st.count);
+      await Promise.all(Array.from({ length: eager }, (_, i) => fetchBlob(i)));
       await decode(0);
       st.ready = true;
-      loader.classList.add("done");
       let next = eager;
       await Promise.all(Array.from({ length: 8 }, async () => {
         while (next < st.count && !dead) { const i = next++; await fetchBlob(i); }
@@ -204,10 +198,6 @@ export default function Film() {
 
   return (
     <div ref={root}>
-      <div id="loader">
-        <img src="/assets/logo.png" alt="Digitrix Media" />
-        <div className="bar"><i id="loadbar" /></div>
-      </div>
       <div id="track">
         <div id="stage">
           <canvas id="film" />
