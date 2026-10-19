@@ -1,0 +1,7 @@
+node_modules
+dist
+.venv
+.claude
+assets/master.mp4
+.DS_Store
+clips/
