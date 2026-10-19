@@ -4,6 +4,8 @@ const BG = "#09090b";
 const NCH = 6; // chapters in the film (replaced by frames.json when present)
 const KEEP = 120; // decoded bitmaps kept around the playhead
 const AHEAD = 30; // decode this many frames ahead
+const FETCH_AHEAD = 90; // download this many frames ahead of the playhead
+const MAX_INFLIGHT = 14; // parallel frame downloads
 
 // Captions: `ch` = chapter index (timing comes from frames.json automatically).
 const CAPTIONS = [
@@ -77,7 +79,23 @@ export default function Film() {
     };
 
     const frameURL = (i) => st.pattern.replace("%04d", String(i + 1).padStart(4, "0"));
-    const fetchBlob = async (i) => (st.blobs[i] ||= await (await fetch(frameURL(i))).blob());
+    const inflight = new Map();
+    const fetchBlob = (i) => {
+      if (st.blobs[i]) return Promise.resolve(st.blobs[i]);
+      if (!inflight.has(i)) {
+        inflight.set(i, fetch(frameURL(i)).then((r) => r.blob()).then((b) => { st.blobs[i] = b; return b; })
+          .catch(() => null).finally(() => inflight.delete(i)));
+      }
+      return inflight.get(i);
+    };
+    // download what the user is about to need first (in scroll direction), a few behind too
+    const prefetchAround = (center) => {
+      for (let d = 0; d <= FETCH_AHEAD && inflight.size < MAX_INFLIGHT; d++) {
+        const f = center + d * st.dir, b = center - Math.min(d, 20) * st.dir;
+        if (f >= 0 && f < st.count && !st.blobs[f]) fetchBlob(f);
+        if (b >= 0 && b < st.count && !st.blobs[b] && inflight.size < MAX_INFLIGHT) fetchBlob(b);
+      }
+    };
     const decode = async (i) => {
       if (st.bitmaps.has(i) || st.decoding.has(i) || !st.blobs[i]) return;
       st.decoding.add(i);
@@ -124,6 +142,7 @@ export default function Film() {
         st.smooth += (st.target - st.smooth) * (1 - Math.exp(-dt * 14));
         if (Math.abs(st.target - st.smooth) < 0.5) st.smooth = st.target;
         const i = Math.round(st.smooth);
+        prefetchAround(i);
         manageWindow(i);
         if (i !== st.current) draw(i);
         updateCaptions(p);
@@ -149,7 +168,7 @@ export default function Film() {
     };
 
     const preload = async () => {
-      const eager = Math.min(Math.ceil(st.count * 0.15), 80);
+      const eager = Math.min(Math.ceil(st.count * 0.3), 200); // loader waits for the first ~30%
       let done = 0;
       await Promise.all(Array.from({ length: eager }, (_, i) => fetchBlob(i).then(() => {
         done++; loadbar.style.width = `${(done / eager) * 100}%`;
@@ -158,8 +177,8 @@ export default function Film() {
       st.ready = true;
       loader.classList.add("done");
       let next = eager;
-      await Promise.all(Array.from({ length: 4 }, async () => {
-        while (next < st.count && !dead) { const i = next++; try { await fetchBlob(i); } catch { /* refetched on demand */ } }
+      await Promise.all(Array.from({ length: 8 }, async () => {
+        while (next < st.count && !dead) { const i = next++; await fetchBlob(i); }
       }));
     };
 
